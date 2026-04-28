@@ -57,6 +57,12 @@ def normalize_record(rec: dict) -> dict:
 
     Non-destructive — returns a shallow copy. Audit metadata (``_audit_*``) is
     left in place; ``parse_record`` ignores unknown fields.
+
+    Cowork assistant records often have NO top-level ``timestamp`` — only
+    ``_audit_timestamp``. Claude Code's scanner drops rows missing
+    ``timestamp``, which would silently discard every assistant turn (where
+    token usage lives). We backfill ``timestamp`` from ``_audit_timestamp``
+    when the upstream field is missing.
     """
     if not isinstance(rec, dict):
         return rec
@@ -64,6 +70,8 @@ def normalize_record(rec: dict) -> dict:
     for snake, camel in _RENAMES.items():
         if snake in out and camel not in out:
             out[camel] = out[snake]
+    if not out.get("timestamp") and out.get("_audit_timestamp"):
+        out["timestamp"] = out["_audit_timestamp"]
     return out
 
 
