@@ -25,9 +25,11 @@ class CliTests(unittest.TestCase):
         )
 
     def test_scan_then_today(self):
-        r1 = self._run("scan", "--projects-dir", self.proj)
+        r1 = self._run("scan", "--projects-dir", self.proj, "--code-only")
         self.assertEqual(r1.returncode, 0, r1.stderr)
-        self.assertIn("scanned", r1.stdout)
+        # Output format: "Token Dashboard: Code — N files, M messages, T tool calls"
+        self.assertIn("files", r1.stdout)
+        self.assertIn("messages", r1.stdout)
         r2 = self._run("today")
         self.assertEqual(r2.returncode, 0, r2.stderr)
         self.assertIn("Token Dashboard", r2.stdout)

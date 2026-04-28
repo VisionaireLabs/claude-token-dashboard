@@ -1,47 +1,61 @@
 # CLAUDE.md
 
-Guidance for Claude Code when working in this repository.
+Guidance for Claude Code (and other AI tools) when working in this repository.
 
 ## Project overview
 
-**Token Dashboard** — a local dashboard for tracking Claude Code token usage, costs, and session history. Reads the JSONL transcripts Claude Code writes to `~/.claude/projects/` and turns them into per-prompt cost analytics, tool/file heatmaps, subagent attribution, cache analytics, project comparisons, and a rule-based tips engine.
+**Claude Token Dashboard** — a local dashboard for tracking token usage, costs, and session history across both Claude Code (terminal CLI) and Cowork (Claude desktop app's agent mode). Reads JSONL transcripts from `~/.claude/projects/` and audit logs from `~/Library/Application Support/Claude/local-agent-mode-sessions/`, and surfaces per-prompt cost analytics, tool/file heatmaps, project comparisons, cache analytics, and a rule-based tips engine.
 
-Inspired by [phuryn/claude-usage](https://github.com/phuryn/claude-usage) but diverges in UI (vanilla JS + ECharts, dark theme, hash router, SSE refresh) and scope (expensive-prompt drill-down, skills view, tips engine, streaming-snapshot dedup). See `docs/inspiration.md` for the original's feature set and known limitations.
+Forked from [`nateherkai/token-dashboard`](https://github.com/nateherkai/token-dashboard) (MIT). The fork's value is Cowork visibility, a topbar source toggle (`all` / `code` / `cowork`), a plan-cost flip on subscription plans, and a redesign per [Impeccable](https://github.com/VisionaireLabs/impeccable).
 
 ## Status
 
-Working codebase. 68 Python unit tests (`python3 -m unittest discover tests`). Seven UI tabs wired up (Overview, Prompts, Sessions, Projects, Skills, Tips, Settings). Runs on macOS, Windows, and Linux.
+Working codebase. 71 unit tests (`python3 -m unittest discover tests`). Seven UI tabs (Overview, Prompts, Sessions, Projects, Skills, Tips, Settings). Runs on macOS; Linux and Windows untested but should work.
 
 ## Architecture
 
-- `cli.py` → `token_dashboard/scanner.py` → `~/.claude/token-dashboard.db` (SQLite)
+- `cli.py` → `token_dashboard/scanner.py` (Claude Code) and `token_dashboard/cowork.py` (Cowork) → `~/.claude/token-dashboard.db` (SQLite)
 - `token_dashboard/server.py` exposes JSON APIs (`/api/*`) + SSE stream (`/api/stream`) + static frontend (`web/`)
-- `web/` is vanilla JS, no build step — hash router + ECharts
+- `web/` is vanilla JS, no build step — hash router + ECharts (vendored)
 
-## Data source
+## Data sources
 
-Claude Code writes one JSONL file per session to `~/.claude/projects/<project-slug>/<session-id>.jsonl`. Each line is a message record; usage fields live at `message.usage` and model identifier at `message.model`. The scanner is incremental — it tracks each file's mtime and byte offset in the `files` table and only reads new bytes on subsequent scans.
+| Surface | Path | File pattern |
+|---|---|---|
+| Claude Code | `~/.claude/projects/<project-slug>/` | `<session-id>.jsonl` |
+| Cowork | `~/Library/Application Support/Claude/local-agent-mode-sessions/<workspace>/<account>/local_<session>/` | `audit.jsonl` |
+
+Both formats share the same `message.usage.*` schema. Cowork uses snake_case top-level fields and adds `_audit_timestamp` / `_audit_hmac`. The Cowork scanner normalizes records to the upstream's camelCase shape and feeds them through the shared `parse_record`. Source is tagged on every row (`messages.source`, `tool_calls.source`).
+
+## Schema
+
+`messages` table holds one row per parsed JSONL record. `tool_calls` holds individual tool invocations and their result sizes. `files` tracks scan high-water marks (mtime + byte offset) for incremental rescans. `plan` stores the user's selected pricing plan. `dismissed_tips` tracks which tips the user has hidden.
+
+## Source filter
+
+Every query function in `db.py` accepts an optional `source` arg (`None` / `"all"` / `"claude_code"` / `"cowork"`) and applies `AND source = ?` via `_source_clause`. The HTTP handlers parse `?source=` from the query string. The frontend `api()` helper auto-appends `?source=` to GET requests when `state.source` is set, persisted in localStorage.
+
+## Streaming-snapshot dedup
+
+Claude Code (and Cowork) write each assistant response 2–3 times as it streams — the same `message.id` appears on multiple records with different top-level `uuid` values. `_evict_prior_snapshots` deletes earlier snapshots so only the final tally per `(session_id, message.id)` survives. This applies to both sources.
+
+## Design system
+
+This project uses [Impeccable](https://github.com/VisionaireLabs/impeccable) — a fork of Anthropic's frontend-design skill. Visual identity is documented in `PRODUCT.md` (register, users, anti-references) and `DESIGN.md` (color tokens, type, layout, charts).
+
+Before changing visual code, load and apply those docs. Skip-to-CSS-and-pray will produce drift. Notable rules:
+
+- Restrained color: tinted-neutral OKLCH palette, no chromatic accent.
+- No `#000` / `#fff` for neutrals — every neutral is tinted (chroma 0.005–0.008, hue 80°).
+- No card grid for KPIs (Impeccable absolute ban: "hero-metric template").
+- Charts use a grayscale ramp; series are differentiated by position/weight, not hue.
+- Cost figures get weight, not color.
+- No gradients, no glassmorphism, no nested cards.
 
 ## Conventions
 
-- **Fully local.** No telemetry, no remote calls for user data. Tests run offline.
-- **Stdlib only.** No `pip install`. If a new feature needs a third-party library, argue for it first — we're willing to pay ergonomics cost to keep install friction at zero.
-- **SQLite parameter binding always.** Any f-string in a SQL statement must interpolate only internal, caller-controlled values (column names, placeholder lists). User-reachable values go through `?`.
-- **Small files with clear responsibilities.** If a file grows past ~400 lines or accretes three distinct concerns, split it.
-- **Streaming-snapshot dedup.** When adding scanner logic that joins the `messages` table, remember `(session_id, message_id)` is the dedup key, not `uuid`. See `scanner._evict_prior_snapshots` and the migration note in `db._migrate_add_message_id`.
-
-## Customizing
-
-Env vars: `PORT` (default 8080), `HOST` (default 127.0.0.1), `CLAUDE_PROJECTS_DIR`, `TOKEN_DASHBOARD_DB`. Pricing lives in `pricing.json`. See README.md § Environment variables for details.
-
-## Known limitations
-
-See `docs/KNOWN_LIMITATIONS.md`. Current summary: Skills `tokens_per_call` is populated only for skills installed under the three scanned roots (`~/.claude/skills/`, `~/.claude/scheduled-tasks/`, `~/.claude/plugins/`); project-local skills and subagent-dispatched skills show invocation counts but blank token counts.
-
-## Verifying changes
-
-```bash
-python3 -m unittest discover tests        # all tests
-python3 cli.py dashboard --no-open        # start the server
-curl http://127.0.0.1:8080/api/overview   # sanity-check an endpoint
-```
+- Stdlib only on the Python side. No `pip install`.
+- Vanilla JS on the frontend. No build step. ECharts is vendored.
+- Keep `pricing.json` as the single source of truth for model rates.
+- All new query functions take a `source` arg and apply `_source_clause`.
+- Test fixtures are synthetic (`sess-1`, `msg-1`, mock usage). Never commit real session data.
