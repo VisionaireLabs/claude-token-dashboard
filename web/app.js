@@ -24,6 +24,11 @@ export const fmt = {
 };
 
 export async function api(path, opts) {
+  // Auto-append the active source filter to GET requests so every route gets the same lens.
+  const isGet = !opts || !opts.method || opts.method.toUpperCase() === 'GET';
+  if (isGet && state.source && state.source !== 'all' && !path.includes('source=')) {
+    path += (path.includes('?') ? '&' : '?') + 'source=' + encodeURIComponent(state.source);
+  }
   const r = await fetch(path, opts);
   if (!r.ok) throw new Error(`${path} → ${r.status}`);
   return r.json();
