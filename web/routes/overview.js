@@ -73,11 +73,7 @@ export default async function (root) {
       ${kpi('Output',       fmt.compact(totals.output_tokens),      fmt.int(totals.output_tokens) + ' tokens')}
       ${kpi('Cache read',   fmt.compact(totals.cache_read_tokens),  fmt.int(totals.cache_read_tokens) + ' tokens')}
       ${kpi('Cache create', fmt.compact(cacheCreate),               fmt.int(cacheCreate) + ' tokens')}
-      <div class="card kpi cost">
-        <div class="label">Est. cost</div>
-        <div class="value" title="${fmt.usd(totals.cost_usd)}">${fmt.usd(totals.cost_usd)}</div>
-        ${planSubtitle()}
-      </div>
+      ${costCard(totals.cost_usd)}
     </div>
 
     <details class="card glossary" style="margin-top:16px">
@@ -187,9 +183,31 @@ export default async function (root) {
   });
 }
 
-function planSubtitle() {
-  if (!state.pricing || state.plan === 'api') return '';
-  const p = state.pricing.plans[state.plan];
-  if (!p || !p.monthly) return '';
-  return `<div class="sub">pay $${p.monthly}/mo on ${fmt.htmlSafe(p.label)}</div>`;
+function costCard(apiCostUsd) {
+  // On API plan, the API cost IS the actual cost. Lead with it.
+  // On a subscription plan (Pro / Max / Max-20x), the user pays a flat
+  // monthly fee — that's the actual cost. The API figure becomes a
+  // secondary signal: "what your usage would have cost without the plan".
+  const plan = state.plan;
+  const planMeta = state.pricing && state.pricing.plans ? state.pricing.plans[plan] : null;
+  if (plan === 'api' || !planMeta || !planMeta.monthly) {
+    return `
+      <div class="card kpi cost">
+        <div class="label">Est. cost</div>
+        <div class="value" title="${fmt.usd(apiCostUsd)}">${fmt.usd(apiCostUsd)}</div>
+      </div>`;
+  }
+  const monthly = `$${planMeta.monthly}/mo`;
+  const apiEq = fmt.usd(apiCostUsd);
+  // Avoid divide-by-zero and silly multiples on no-data
+  const multiple = (apiCostUsd && planMeta.monthly) ? (apiCostUsd / planMeta.monthly) : 0;
+  const subline = multiple >= 1.1
+    ? `${apiEq} API-equiv · ${multiple.toFixed(1)}× value`
+    : `${apiEq} API-equiv`;
+  return `
+    <div class="card kpi cost">
+      <div class="label">Plan cost</div>
+      <div class="value" title="${monthly} on ${fmt.htmlSafe(planMeta.label)}">${monthly}</div>
+      <div class="sub">${subline}</div>
+    </div>`;
 }

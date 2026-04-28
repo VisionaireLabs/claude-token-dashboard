@@ -17,7 +17,7 @@ const BG          = '#FCFBF8';   // --bg          (oklch 99%)
 const SURFACE     = '#F8F6F1';   // --surface     (oklch 97%)
 const BORDER      = '#EFECE5';   // --border      (oklch 92%)
 const BORDER_HARD = '#E0DCD3';   // --border-strong (oklch 86%)
-const TEXT        = '#2D2A24';   // --text
+const TEXT        = '#2D2A24';   // --text (oklch 18% 0.008 80, sRGB approx)
 const TEXT_MUTED  = '#8B847A';   // --text-muted
 const TEXT_FAINT  = '#B5AEA3';   // --text-faint
 
